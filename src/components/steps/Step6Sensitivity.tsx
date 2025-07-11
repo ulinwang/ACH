@@ -38,7 +38,7 @@ interface SensitivityScenario {
 }
 
 export const Step6Sensitivity: React.FC = () => {
-    const { data, updateMatrixScore } = useAnalysisStore();
+    const { data, updateMatrixScore, updateSensitivityAnalysis } = useAnalysisStore();
     const [selectedTab, setSelectedTab] = useState('auto');
     const [testMode, setTestMode] = useState(false);
     const [selectedHypothesis, setSelectedHypothesis] = useState<string>('');
@@ -50,6 +50,21 @@ export const Step6Sensitivity: React.FC = () => {
     const [reliabilityAdjustments, setReliabilityAdjustments] = useState<Record<string, number>>({});
     const [autoTestResults, setAutoTestResults] = useState<any[]>([]);
     const [isAutoTestComplete, setIsAutoTestComplete] = useState(false);
+    const [singleTestResults, setSingleTestResults] = useState<SensitivityResult[] | null>(null);
+    const [sensitivityFilter, setSensitivityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
+    const [typeFilter, setTypeFilter] = useState<'all' | 'single' | 'weight' | 'reliability'>('all');
+
+    // 当组件首次加载时，标记为已访问敏感性分析步骤
+    React.useEffect(() => {
+        if (data.hypotheses.length > 0 && data.evidence.length > 0 && Object.keys(data.matrix).length > 0) {
+            // 只有在有基础数据的情况下才标记为已访问
+            const sensitivityData = {
+                stepVisited: true,
+                visitedAt: new Date()
+            };
+            updateSensitivityAnalysis(sensitivityData);
+        }
+    }, []);
 
     const getMatrixScore = (hypothesisId: string, evidenceId: string): number => {
         const key = `${hypothesisId}-${evidenceId}`;
@@ -224,7 +239,7 @@ export const Step6Sensitivity: React.FC = () => {
 
     // 自动敏感性测试
     const performAutoSensitivityTest = () => {
-        const testResults = [];
+        const testResults: any[] = [];
 
         // 1. 测试所有单个评分变化
         data.hypotheses.forEach(hypothesis => {
@@ -304,6 +319,15 @@ export const Step6Sensitivity: React.FC = () => {
         setAutoTestResults(testResults);
         setIsAutoTestComplete(true);
 
+        // 保存敏感性分析结果到store
+        const sensitivityData = {
+            testResults,
+            stabilityMetrics,
+            completedAt: new Date(),
+            testCount: testResults.length
+        };
+        updateSensitivityAnalysis(sensitivityData);
+
         return testResults;
     };
 
@@ -355,7 +379,19 @@ export const Step6Sensitivity: React.FC = () => {
         if (!selectedHypothesis || !selectedEvidence) return;
 
         const results = performSingleVariableSensitivity(selectedHypothesis, selectedEvidence, testScore);
-        return results;
+        setSingleTestResults(results);
+
+        // 保存单变量敏感性分析结果
+        const sensitivityData = {
+            singleVariableTest: {
+                hypothesisId: selectedHypothesis,
+                evidenceId: selectedEvidence,
+                testScore,
+                results,
+                completedAt: new Date()
+            }
+        };
+        updateSensitivityAnalysis(sensitivityData);
     };
 
     const exportSensitivityReport = () => {
@@ -557,6 +593,46 @@ ${originalRanking.map((h, i) => `${i + 1}. ${h.text} (得分: ${h.score.weighted
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
+                                        {/* 筛选器 */}
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center space-x-4">
+                                                <div className="flex items-center space-x-2">
+                                                    <Label className="text-sm font-medium">敏感性等级：</Label>
+                                                    <Select value={sensitivityFilter} onValueChange={(value: 'all' | 'high' | 'medium' | 'low') => setSensitivityFilter(value)}>
+                                                        <SelectTrigger className="w-32 h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="all">全部</SelectItem>
+                                                            <SelectItem value="high">高敏感</SelectItem>
+                                                            <SelectItem value="medium">中敏感</SelectItem>
+                                                            <SelectItem value="low">低敏感</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Label className="text-sm font-medium">变动类型：</Label>
+                                                    <Select value={typeFilter} onValueChange={(value: 'all' | 'single' | 'weight' | 'reliability') => setTypeFilter(value)}>
+                                                        <SelectTrigger className="w-32 h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="all">全部</SelectItem>
+                                                            <SelectItem value="single">评分变动</SelectItem>
+                                                            <SelectItem value="weight">权重变动</SelectItem>
+                                                            <SelectItem value="reliability">可靠性变动</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </div>
+                                            <div className="text-sm text-gray-500">
+                                                共 {autoTestResults.filter(r =>
+                                                    (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                    (typeFilter === 'all' || r.type === typeFilter)
+                                                ).length} 个测试场景
+                                            </div>
+                                        </div>
+
                                         {/* 测试结果汇总 */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -590,62 +666,139 @@ ${originalRanking.map((h, i) => `${i + 1}. ${h.text} (得分: ${h.score.weighted
 
                                         <Separator />
 
-                                        {/* 关键敏感性发现 */}
+                                        {/* 按证据分组的敏感性发现 */}
                                         <div>
-                                            <h4 className="font-medium text-gray-900 mb-3">关键敏感性发现</h4>
-                                            <div className="space-y-3">
-                                                {autoTestResults
-                                                    .filter(r => r.sensitivity === 'high')
-                                                    .slice(0, 10)
-                                                    .map((result, index) => (
-                                                        <div key={index} className="border border-gray-200 rounded-lg p-3">
-                                                            <div className="flex items-start justify-between">
-                                                                <div className="flex-1">
-                                                                    <div className="flex items-center space-x-2 mb-1">
-                                                                        <Badge className={`text-xs ${result.sensitivity === 'high' ? 'bg-red-100 text-red-800' :
-                                                                            result.sensitivity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                                                                'bg-green-100 text-green-800'}`}>
-                                                                            {result.sensitivity === 'high' ? '高敏感' :
-                                                                                result.sensitivity === 'medium' ? '中敏感' : '低敏感'}
-                                                                        </Badge>
-                                                                        <Badge variant="outline" className="text-xs">
-                                                                            {result.type === 'single' ? '评分变化' :
-                                                                                result.type === 'weight' ? '权重变化' : '可靠性变化'}
-                                                                        </Badge>
-                                                                    </div>
-                                                                    <p className="text-sm text-gray-900">
-                                                                        {result.type === 'single' && (
-                                                                            <>
-                                                                                假设 H{data.hypotheses.findIndex(h => h.id === result.hypothesisId) + 1}
-                                                                                在证据 E{data.evidence.findIndex(e => e.id === result.evidenceId) + 1}
-                                                                                上评分从 {result.originalScore} 变为 {result.newScore}
-                                                                            </>
-                                                                        )}
-                                                                        {result.type === 'weight' && (
-                                                                            <>
-                                                                                证据 E{data.evidence.findIndex(e => e.id === result.evidenceId) + 1}
-                                                                                权重从 {result.originalWeight}% 变为 {result.newWeight}%
-                                                                            </>
-                                                                        )}
-                                                                        {result.type === 'reliability' && (
-                                                                            <>
-                                                                                证据 E{data.evidence.findIndex(e => e.id === result.evidenceId) + 1}
-                                                                                可靠性从 {result.originalReliability}% 变为 {result.newReliability}%
-                                                                            </>
-                                                                        )}
-                                                                    </p>
+                                            <h4 className="font-medium text-gray-900 mb-3">按证据分组的敏感性发现</h4>
+                                            <div className="space-y-4">
+                                                {data.evidence.map((evidence, evidenceIndex) => {
+                                                    // 获取与该证据相关的所有敏感性发现，并应用筛选
+                                                    const evidenceResults = autoTestResults.filter(r =>
+                                                        r.evidenceId === evidence.id &&
+                                                        (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                        (typeFilter === 'all' || r.type === typeFilter)
+                                                    );
+
+                                                    if (evidenceResults.length === 0) return null;
+
+                                                    // 按敏感性等级分组
+                                                    const highResults = evidenceResults.filter(r => r.sensitivity === 'high');
+                                                    const mediumResults = evidenceResults.filter(r => r.sensitivity === 'medium');
+                                                    const lowResults = evidenceResults.filter(r => r.sensitivity === 'low');
+
+                                                    return (
+                                                        <div key={evidence.id} className="border border-gray-200 rounded-lg p-4">
+                                                            <div className="flex items-center justify-between mb-3">
+                                                                <div className="flex items-center space-x-2">
+                                                                    <Badge variant="outline" className="text-blue-600 border-blue-200">
+                                                                        E{evidenceIndex + 1}
+                                                                    </Badge>
+                                                                    <h5 className="font-medium text-gray-900">
+                                                                        {evidence.text.substring(0, 50)}...
+                                                                    </h5>
                                                                 </div>
-                                                                <div className="text-right">
-                                                                    <p className="text-sm font-medium text-red-600">
-                                                                        最大影响: {result.maxChange.toFixed(1)}%
-                                                                    </p>
-                                                                    <p className="text-xs text-gray-600">
-                                                                        {result.rankingChanges}个假设排名变化
-                                                                    </p>
+                                                                <div className="flex items-center space-x-2">
+                                                                    {highResults.length > 0 && (
+                                                                        <Badge className="bg-red-100 text-red-800 text-xs">
+                                                                            {highResults.length} 高敏感
+                                                                        </Badge>
+                                                                    )}
+                                                                    {mediumResults.length > 0 && (
+                                                                        <Badge className="bg-yellow-100 text-yellow-800 text-xs">
+                                                                            {mediumResults.length} 中敏感
+                                                                        </Badge>
+                                                                    )}
+                                                                    {lowResults.length > 0 && (
+                                                                        <Badge className="bg-green-100 text-green-800 text-xs">
+                                                                            {lowResults.length} 低敏感
+                                                                        </Badge>
+                                                                    )}
                                                                 </div>
                                                             </div>
+
+                                                            {/* 高敏感性发现 */}
+                                                            {highResults.length > 0 && (
+                                                                <div className="mb-3">
+                                                                    <h6 className="text-sm font-medium text-red-700 mb-2">高敏感性变化</h6>
+                                                                    <div className="space-y-2">
+                                                                        {highResults.slice(0, 3).map((result, index) => (
+                                                                            <div key={index} className="bg-red-50 border border-red-200 rounded p-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <div className="text-sm text-red-800">
+                                                                                        {result.type === 'single' && (
+                                                                                            <>
+                                                                                                H{data.hypotheses.findIndex(h => h.id === result.hypothesisId) + 1}
+                                                                                                评分: {result.originalScore} → {result.newScore}
+                                                                                            </>
+                                                                                        )}
+                                                                                        {result.type === 'weight' && (
+                                                                                            <>权重: {result.originalWeight}% → {result.newWeight}%</>
+                                                                                        )}
+                                                                                        {result.type === 'reliability' && (
+                                                                                            <>可靠性: {result.originalReliability}% → {result.newReliability}%</>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <div className="text-xs text-red-600 font-medium">
+                                                                                        影响: {result.maxChange.toFixed(1)}%
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                        {highResults.length > 3 && (
+                                                                            <p className="text-xs text-red-600">
+                                                                                还有 {highResults.length - 3} 个高敏感性发现...
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* 中等敏感性发现 */}
+                                                            {mediumResults.length > 0 && (
+                                                                <div className="mb-3">
+                                                                    <h6 className="text-sm font-medium text-yellow-700 mb-2">中等敏感性变化</h6>
+                                                                    <div className="space-y-2">
+                                                                        {mediumResults.slice(0, 2).map((result, index) => (
+                                                                            <div key={index} className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <div className="text-sm text-yellow-800">
+                                                                                        {result.type === 'single' && (
+                                                                                            <>
+                                                                                                H{data.hypotheses.findIndex(h => h.id === result.hypothesisId) + 1}
+                                                                                                评分: {result.originalScore} → {result.newScore}
+                                                                                            </>
+                                                                                        )}
+                                                                                        {result.type === 'weight' && (
+                                                                                            <>权重: {result.originalWeight}% → {result.newWeight}%</>
+                                                                                        )}
+                                                                                        {result.type === 'reliability' && (
+                                                                                            <>可靠性: {result.originalReliability}% → {result.newReliability}%</>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <div className="text-xs text-yellow-600 font-medium">
+                                                                                        影响: {result.maxChange.toFixed(1)}%
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                        {mediumResults.length > 2 && (
+                                                                            <p className="text-xs text-yellow-600">
+                                                                                还有 {mediumResults.length - 2} 个中等敏感性发现...
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* 证据总结 */}
+                                                            <div className="bg-gray-50 p-2 rounded text-xs text-gray-600">
+                                                                <strong>证据敏感性总结：</strong>
+                                                                该证据共有 {evidenceResults.length} 个敏感性测试场景，
+                                                                其中 {highResults.length} 个高敏感、{mediumResults.length} 个中敏感、{lowResults.length} 个低敏感。
+                                                                {highResults.length > 0 && '建议重点关注该证据的评分准确性。'}
+                                                            </div>
                                                         </div>
-                                                    ))}
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 
@@ -659,11 +812,23 @@ ${originalRanking.map((h, i) => `${i + 1}. ${h.text} (得分: ${h.score.weighted
                                                     <div>
                                                         <h5 className="font-medium text-blue-800 mb-2">结论稳定性</h5>
                                                         <p className="text-sm text-blue-700">
-                                                            {autoTestResults.filter(r => r.rankingChanges > 0).length === 0 ?
+                                                            {autoTestResults.filter(r =>
+                                                                (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                                (typeFilter === 'all' || r.type === typeFilter) &&
+                                                                r.rankingChanges > 0
+                                                            ).length === 0 ?
                                                                 '极其稳定 - 没有发现任何会改变假设排名的敏感性因素' :
-                                                                autoTestResults.filter(r => r.rankingChanges > 0 && r.sensitivity === 'high').length === 0 ?
+                                                                autoTestResults.filter(r =>
+                                                                    (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                                    (typeFilter === 'all' || r.type === typeFilter) &&
+                                                                    r.rankingChanges > 0 && r.sensitivity === 'high'
+                                                                ).length === 0 ?
                                                                     '较为稳定 - 高敏感性变化不会改变假设排名' :
-                                                                    autoTestResults.filter(r => r.rankingChanges > 0 && r.sensitivity === 'high').length <= 3 ?
+                                                                    autoTestResults.filter(r =>
+                                                                        (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                                        (typeFilter === 'all' || r.type === typeFilter) &&
+                                                                        r.rankingChanges > 0 && r.sensitivity === 'high'
+                                                                    ).length <= 3 ?
                                                                         '一般稳定 - 少数高敏感性变化可能改变假设排名' :
                                                                         '不稳定 - 多个高敏感性变化会改变假设排名'
                                                             }
@@ -672,9 +837,17 @@ ${originalRanking.map((h, i) => `${i + 1}. ${h.text} (得分: ${h.score.weighted
                                                     <div>
                                                         <h5 className="font-medium text-blue-800 mb-2">建议</h5>
                                                         <p className="text-sm text-blue-700">
-                                                            {autoTestResults.filter(r => r.sensitivity === 'high').length === 0 ?
+                                                            {autoTestResults.filter(r =>
+                                                                (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                                (typeFilter === 'all' || r.type === typeFilter) &&
+                                                                r.sensitivity === 'high'
+                                                            ).length === 0 ?
                                                                 '结论可靠，可以进入下一步分析' :
-                                                                autoTestResults.filter(r => r.sensitivity === 'high').length <= 5 ?
+                                                                autoTestResults.filter(r =>
+                                                                    (sensitivityFilter === 'all' || r.sensitivity === sensitivityFilter) &&
+                                                                    (typeFilter === 'all' || r.type === typeFilter) &&
+                                                                    r.sensitivity === 'high'
+                                                                ).length <= 5 ?
                                                                     '建议重点关注高敏感性因素，验证相关评分' :
                                                                     '建议重新审视评分和权重设置，增加更多证据'
                                                             }
@@ -769,10 +942,10 @@ ${originalRanking.map((h, i) => `${i + 1}. ${h.text} (得分: ${h.score.weighted
                                     )}
 
                                     {/* 测试结果 */}
-                                    {selectedHypothesis && selectedEvidence && (
+                                    {singleTestResults && singleTestResults.length > 0 && (
                                         <div className="space-y-3">
                                             <h4 className="font-medium text-gray-900">测试结果</h4>
-                                            {runSensitivityTest()?.map((result) => {
+                                            {singleTestResults.map((result) => {
                                                 const hypothesis = data.hypotheses.find(h => h.id === result.hypothesisId);
                                                 return (
                                                     <div key={result.hypothesisId} className="p-3 border border-gray-200 rounded-lg">

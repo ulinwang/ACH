@@ -13,6 +13,133 @@ import { Alert, AlertDescription } from '../ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import type { Priority } from '../../types';
 
+// 可拖拽滑块组件
+interface DraggableSliderProps {
+    value: number;
+    onChange: (value: number) => void;
+    min?: number;
+    max?: number;
+    step?: number;
+    className?: string;
+    label?: string;
+}
+
+const DraggableSlider: React.FC<DraggableSliderProps> = ({
+    value,
+    onChange,
+    min = 0,
+    max = 100,
+    step = 1,
+    className = '',
+    label
+}) => {
+    const [isDragging, setIsDragging] = useState(false);
+    const sliderRef = React.useRef<HTMLDivElement>(null);
+
+    const calculateValue = (clientX: number) => {
+        if (!sliderRef.current) return value;
+
+        const rect = sliderRef.current.getBoundingClientRect();
+        const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+        const percentage = (x / rect.width) * 100;
+        const newValue = Math.round((percentage / 100) * (max - min) + min);
+        return Math.max(min, Math.min(max, Math.round(newValue / step) * step));
+    };
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+
+        // 立即更新值
+        const newValue = calculateValue(e.clientX);
+        onChange(newValue);
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const newValue = calculateValue(moveEvent.clientX);
+            onChange(newValue);
+        };
+
+        const handleMouseUp = () => {
+            setIsDragging(false);
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
+
+    const handleTrackClick = (e: React.MouseEvent) => {
+        // 如果点击的是手柄，不处理
+        if ((e.target as HTMLElement).closest('.slider-handle')) return;
+
+        const newValue = calculateValue(e.clientX);
+        onChange(newValue);
+    };
+
+    const progressValue = ((value - min) / (max - min)) * 100;
+
+    return (
+        <div className={`space-y-1 ${className}`}>
+            {label && (
+                <Label className="text-xs font-medium text-gray-700 flex items-center justify-between">
+                    <span>{label}</span>
+                    <span className="text-blue-600 font-semibold">{value}%</span>
+                </Label>
+            )}
+            <div
+                ref={sliderRef}
+                className="slider-container relative h-3 bg-gray-200 rounded-full cursor-pointer hover:bg-gray-300 transition-colors"
+                onClick={handleTrackClick}
+            >
+                {/* 进度条背景 */}
+                <div
+                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-150"
+                    style={{ width: `${progressValue}%` }}
+                />
+
+                {/* 拖拽手柄 */}
+                <div
+                    className={`slider-handle absolute top-1/2 transform -translate-y-1/2 w-5 h-5 bg-white border-2 border-blue-500 rounded-full shadow-md cursor-grab transition-all duration-150 ${isDragging ? 'scale-110 shadow-lg cursor-grabbing border-blue-600' : 'hover:scale-105 hover:shadow-lg'
+                        }`}
+                    style={{ left: `calc(${progressValue}% - 10px)` }}
+                    onMouseDown={handleMouseDown}
+                >
+                    <div className="absolute inset-1 bg-blue-500 rounded-full opacity-50" />
+                </div>
+
+                {/* 刻度线（可选） */}
+                <div className="absolute top-0 left-0 w-full h-full flex items-center pointer-events-none">
+                    {[0, 25, 50, 75, 100].map((tick) => (
+                        <div
+                            key={tick}
+                            className="absolute w-0.5 h-2 bg-gray-400 opacity-30"
+                            style={{ left: `${tick}%` }}
+                        />
+                    ))}
+                </div>
+            </div>
+
+            {/* 数值输入框 */}
+            <div className="flex items-center space-x-2 mt-1">
+                <Input
+                    type="number"
+                    value={value}
+                    onChange={(e) => {
+                        const newValue = Math.max(min, Math.min(max, parseInt(e.target.value) || 0));
+                        onChange(newValue);
+                    }}
+                    min={min}
+                    max={max}
+                    step={step}
+                    className="w-16 h-6 text-xs text-center"
+                />
+                <span className="text-xs text-gray-500">%</span>
+            </div>
+        </div>
+    );
+};
+
 export const Step1Hypotheses: React.FC = () => {
     const { data, addHypothesis, updateHypothesis, deleteHypothesis, reorderHypotheses } = useAnalysisStore();
     const [newHypothesis, setNewHypothesis] = useState('');
@@ -254,18 +381,13 @@ export const Step1Hypotheses: React.FC = () => {
 
                                             <div className="space-y-2">
                                                 <div>
-                                                    <Label className="text-xs font-medium text-gray-700">
-                                                        置信度: {hypothesis.confidence}%
-                                                    </Label>
-                                                    <Progress
+                                                    <DraggableSlider
                                                         value={hypothesis.confidence}
-                                                        className="h-2 mt-1 cursor-pointer"
-                                                        onClick={(e) => {
-                                                            const rect = e.currentTarget.getBoundingClientRect();
-                                                            const x = e.clientX - rect.left;
-                                                            const percentage = Math.round((x / rect.width) * 100);
-                                                            handleUpdateConfidence(hypothesis.id, Math.max(0, Math.min(100, percentage)));
-                                                        }}
+                                                        onChange={(value) => handleUpdateConfidence(hypothesis.id, value)}
+                                                        min={0}
+                                                        max={100}
+                                                        step={1}
+                                                        label="置信度"
                                                     />
                                                 </div>
 

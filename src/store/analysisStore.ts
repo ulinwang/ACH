@@ -521,16 +521,33 @@ export const useAnalysisStore = create<AnalysisState & AnalysisActions>()(
 
                 // 敏感性分析操作
                 updateSensitivityAnalysis: (analysis: Record<string, any>) => {
-                    set((state) => ({
-                        data: {
-                            ...state.data,
-                            sensitivity: state.data.sensitivity.map(s => ({ ...s, ...analysis })),
-                            metadata: {
-                                ...state.data.metadata,
+                    set((state) => {
+                        // 如果没有现有的敏感性分析数据，创建一个新的
+                        const newSensitivity = state.data.sensitivity.length > 0
+                            ? state.data.sensitivity.map(s => ({ ...s, ...analysis }))
+                            : [{
+                                id: generateId(),
+                                evidenceId: '', // 这是自动测试的结果，不针对特定证据
+                                impact: 0,
+                                isKeyEvidence: false,
+                                robustnessScore: 0,
+                                scenarios: [],
+                                createdAt: new Date(),
                                 updatedAt: new Date(),
+                                ...analysis
+                            }];
+
+                        return {
+                            data: {
+                                ...state.data,
+                                sensitivity: newSensitivity,
+                                metadata: {
+                                    ...state.data.metadata,
+                                    updatedAt: new Date(),
+                                },
                             },
-                        },
-                    }));
+                        };
+                    });
                 },
 
                 // 报告操作

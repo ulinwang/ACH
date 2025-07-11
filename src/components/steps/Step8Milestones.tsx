@@ -166,15 +166,38 @@ export const Step8Milestones: React.FC = () => {
         const conclusionCheck: CompletionCheck = {
             step: 'conclusion',
             name: '分析结论',
-            completed: data.conclusions.length > 0,
-            score: data.conclusions.length > 0 ? 100 : 0,
+            completed: false,
+            score: 0,
             issues: [],
             recommendations: []
         };
 
-        if (data.conclusions.length === 0) {
-            conclusionCheck.issues.push('未得出分析结论');
-            conclusionCheck.recommendations.push('基于矩阵分析得出初步结论');
+        // 检查是否有足够的前置条件完成结论分析
+        if (data.hypotheses.length === 0 || data.evidence.length === 0) {
+            conclusionCheck.score = 0;
+            conclusionCheck.issues.push('缺少基础数据');
+            conclusionCheck.recommendations.push('先完成假设和证据的收集');
+        } else if (completionRate < 50) {
+            conclusionCheck.score = 0;
+            conclusionCheck.issues.push('矩阵评分不足，无法得出可靠结论');
+            conclusionCheck.recommendations.push('完成更多矩阵评分后再进行结论分析');
+        } else {
+            // 如果用户已经访问过步骤5或有结论数据，则认为已完成
+            const hasConclusions = data.conclusions && data.conclusions.length > 0;
+            const hasValidMatrix = completionRate >= 50;
+
+            if (hasConclusions || hasValidMatrix) {
+                conclusionCheck.score = 100;
+                conclusionCheck.completed = true;
+                if (!hasConclusions) {
+                    conclusionCheck.issues.push('建议在步骤5中正式记录分析结论');
+                    conclusionCheck.recommendations.push('访问步骤5查看假设排序并记录结论');
+                }
+            } else {
+                conclusionCheck.score = 0;
+                conclusionCheck.issues.push('未进行结论分析');
+                conclusionCheck.recommendations.push('前往步骤5查看假设排序并得出结论');
+            }
         }
         checks.push(conclusionCheck);
 
@@ -182,15 +205,69 @@ export const Step8Milestones: React.FC = () => {
         const sensitivityCheck: CompletionCheck = {
             step: 'sensitivity',
             name: '敏感性分析',
-            completed: data.sensitivity && data.sensitivity.length > 0,
-            score: (data.sensitivity && data.sensitivity.length > 0) ? 100 : 0,
+            completed: false,
+            score: 0,
             issues: [],
             recommendations: []
         };
 
-        if (!data.sensitivity || data.sensitivity.length === 0) {
-            sensitivityCheck.issues.push('未进行敏感性分析');
-            sensitivityCheck.recommendations.push('分析结论对关键证据变化的敏感性');
+        // 检查是否有足够的前置条件进行敏感性分析
+        if (data.hypotheses.length === 0 || data.evidence.length === 0) {
+            sensitivityCheck.score = 0;
+            sensitivityCheck.issues.push('缺少基础数据');
+            sensitivityCheck.recommendations.push('先完成假设和证据的收集');
+        } else if (completionRate < 30) {
+            sensitivityCheck.score = 0;
+            sensitivityCheck.issues.push('矩阵评分不足，无法进行有效的敏感性分析');
+            sensitivityCheck.recommendations.push('完成更多矩阵评分后再进行敏感性分析');
+        } else {
+            // 检查敏感性分析的完成情况
+            const hasSensitivityData = data.sensitivity && data.sensitivity.length > 0;
+            const canPerformSensitivity = completionRate >= 30 && data.evidence.length >= 3;
+
+            if (hasSensitivityData) {
+                // 检查敏感性分析数据的完整性
+                const firstSensitivity = data.sensitivity[0] as any;
+                let sensitivityScore = 0;
+
+                // 检查是否访问过步骤6
+                if (firstSensitivity.stepVisited) {
+                    sensitivityScore += 40;
+                }
+
+                // 检查是否有自动测试结果
+                if (firstSensitivity.testResults && firstSensitivity.testResults.length > 0) {
+                    sensitivityScore += 40;
+                }
+
+                // 检查是否有单变量测试结果
+                if (firstSensitivity.singleVariableTest) {
+                    sensitivityScore += 20;
+                }
+
+                sensitivityCheck.score = Math.min(sensitivityScore, 100);
+                sensitivityCheck.completed = sensitivityScore >= 60;
+
+                if (sensitivityScore < 100) {
+                    if (!firstSensitivity.testResults || firstSensitivity.testResults.length === 0) {
+                        sensitivityCheck.issues.push('建议运行自动敏感性测试');
+                        sensitivityCheck.recommendations.push('在步骤6中运行自动敏感性测试以获得全面分析');
+                    }
+                    if (!firstSensitivity.singleVariableTest) {
+                        sensitivityCheck.issues.push('建议进行单变量敏感性测试');
+                        sensitivityCheck.recommendations.push('在步骤6中测试关键证据的敏感性');
+                    }
+                }
+            } else if (canPerformSensitivity) {
+                // 具备进行敏感性分析的条件，但尚未开始
+                sensitivityCheck.score = 0;
+                sensitivityCheck.issues.push('尚未进行敏感性分析');
+                sensitivityCheck.recommendations.push('访问步骤6进行敏感性分析');
+            } else {
+                sensitivityCheck.score = 0;
+                sensitivityCheck.issues.push('数据不足，无法进行有效的敏感性分析');
+                sensitivityCheck.recommendations.push('增加更多证据和矩阵评分后进行敏感性分析');
+            }
         }
         checks.push(sensitivityCheck);
 
@@ -198,31 +275,53 @@ export const Step8Milestones: React.FC = () => {
         const reportCheck: CompletionCheck = {
             step: 'report',
             name: '报告生成',
-            completed: data.report && (
-                Boolean(data.report.sections.summary.content) ||
-                Boolean(data.report.sections.analysis.content) ||
-                Boolean(data.report.sections.conclusions.content)
-            ),
+            completed: false,
             score: 0,
             issues: [],
             recommendations: []
         };
 
-        if (!data.report || (
-            !data.report.sections.summary.content &&
-            !data.report.sections.analysis.content &&
-            !data.report.sections.conclusions.content
-        )) {
+        // 报告生成需要有前面的分析作为基础
+        if (!conclusionCheck.completed) {
             reportCheck.score = 0;
-            reportCheck.issues.push('未生成分析报告');
-            reportCheck.recommendations.push('生成完整的分析报告');
+            reportCheck.issues.push('需要先完成分析结论');
+            reportCheck.recommendations.push('先完成前面的分析步骤');
         } else {
-            let reportScore = 0;
-            if (data.report.sections.summary.content) reportScore += 33;
-            if (data.report.sections.analysis.content) reportScore += 33;
-            if (data.report.sections.conclusions.content) reportScore += 34;
-            reportCheck.score = reportScore;
-            reportCheck.completed = reportScore >= 67;
+            // 检查是否有报告内容或具备生成报告的条件
+            const hasReportContent = data.report && (
+                Boolean(data.report.sections?.summary?.content) ||
+                Boolean(data.report.sections?.analysis?.content) ||
+                Boolean(data.report.sections?.conclusions?.content)
+            );
+
+            const canGenerateReport = data.hypotheses.length > 0 &&
+                data.evidence.length > 0 &&
+                completionRate >= 30;
+
+            if (hasReportContent) {
+                // 根据报告内容的完整性评分
+                let reportScore = 0;
+                if (data.report.sections?.summary?.content) reportScore += 33;
+                if (data.report.sections?.analysis?.content) reportScore += 33;
+                if (data.report.sections?.conclusions?.content) reportScore += 34;
+                reportCheck.score = reportScore;
+                reportCheck.completed = reportScore >= 67;
+
+                if (reportScore < 100) {
+                    reportCheck.issues.push('报告内容不完整');
+                    reportCheck.recommendations.push('在步骤7中生成完整的分析报告');
+                }
+            } else if (canGenerateReport) {
+                // 具备生成报告的条件，视为可以完成
+                reportCheck.score = 100;
+                reportCheck.completed = true;
+                reportCheck.issues.push('建议在步骤7中生成正式报告');
+                reportCheck.recommendations.push('访问步骤7生成完整的分析报告');
+            } else {
+                reportCheck.score = 0;
+                reportCheck.issues.push('分析数据不足，无法生成有效报告');
+                reportCheck.recommendations.push('完成更多分析内容后生成报告');
+            }
         }
         checks.push(reportCheck);
 
