@@ -72,7 +72,7 @@ ACH分析通过系统性地评估多个竞争性假设与可用证据的一致�
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd ach-analysis-tool-v2
+cd ACH
 
 # 安装依赖
 npm install
